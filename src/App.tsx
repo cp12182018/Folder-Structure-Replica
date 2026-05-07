@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import JSZip from 'jszip';
-import { Upload, Download, Folder, FolderOpen, AlertCircle, ChevronRight, ChevronDown, Copy } from 'lucide-react';
+import { Upload, Download, Folder, FolderOpen, AlertCircle, ChevronRight, ChevronDown, Copy, Settings, HardDrive, Files, RefreshCw } from 'lucide-react';
 
 export interface TreeNode {
   name: string;
@@ -17,22 +17,27 @@ const TreeView: React.FC<{ node: TreeNode, level?: number }> = ({ node, level = 
   const hasChildren = node.children && node.children.length > 0;
 
   return (
-    <div className={level > 0 ? "tree-line font-mono" : "font-mono"}>
+    <div className="font-mono text-[13px] leading-6">
       <div 
-        className={`flex items-center gap-2 mb-2 cursor-pointer transition-colors select-none ${level === 0 ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
+        className={`flex items-center gap-2 cursor-pointer select-none group w-fit py-0.5 pr-2 rounded transition-colors
+          ${level === 0 ? 'text-[#ededed] font-medium' : 'text-[#a1a1aa] hover:text-[#ededed]'}`}
         onClick={() => setIsOpen(!isOpen)}
       >
-        {isOpen ? (
-          <FolderOpen size={16} className={level === 0 ? 'text-blue-400' : 'text-blue-400/60'} />
-        ) : (
-          <Folder size={16} className={level === 0 ? 'text-blue-400' : 'text-blue-400/60'} />
-        )}
+        <span className={`flex items-center justify-center w-4 h-4 transition-colors ${level === 0 ? 'text-indigo-400' : 'text-[#71717a] group-hover:text-[#a1a1aa]'}`}>
+          {hasChildren ? (
+            isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+          ) : (
+            <span className="w-1 h-1 rounded-full bg-[#52525b]" />
+          )}
+        </span>
+        <span className={`${level === 0 ? 'text-indigo-400' : 'text-[#71717a] group-hover:text-[#a1a1aa]'}`}>
+          {isOpen ? <FolderOpen size={14} /> : <Folder size={14} />}
+        </span>
         <span>{node.name}</span>
-        {level === 0 && <span className="text-xs text-slate-600 font-sans ml-1">/ root</span>}
       </div>
       
       {hasChildren && isOpen && (
-        <div className="flex flex-col">
+        <div className="ml-2 pl-4 border-l border-[#262626]">
           {node.children.map((child, idx) => (
             <TreeView key={`${child.path}-${idx}`} node={child} level={level + 1} />
           ))}
@@ -147,6 +152,7 @@ export default function App() {
     setDragOver(false);
     resetState();
     
+    // Check if dropping on the window works correctly
     const items = e.dataTransfer.items;
     if (!items || items.length === 0) return;
 
@@ -210,177 +216,172 @@ export default function App() {
   const totalFolders = tree ? countFolders(tree) : 0;
 
   return (
-    <div className="h-screen w-full flex flex-col gap-4 p-6 box-border font-sans">
-      <header className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 pb-2 border-b border-[#30363D] shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            <Copy className="w-6 h-6 text-blue-500" />
-            Folder Structure Replicator
-            <span className="text-xs font-mono bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 ml-2">
-              v1.0.4-client
-            </span>
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            Offline-first recursive structure cloning via File System Access API
-          </p>
+    <div 
+      className="flex h-screen w-full bg-[#050505] text-[#ededed] font-sans overflow-hidden"
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={(e) => {
+        // Only reset if dragging leaves the window
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          setDragOver(false);
+        }
+      }}
+      onDrop={handleDrop}
+    >
+      {/* Sidebar */}
+      <div className="w-full sm:w-[340px] flex-shrink-0 border-r border-[#262626] bg-[#0a0a0a] flex flex-col pt-4 z-20">
+        {/* Header */}
+        <div className="px-6 pb-6 border-b border-[#262626]">
+           <div className="flex items-center gap-2 mb-1">
+              <FolderOpen size={20} className="text-indigo-400" />
+              <h1 className="font-semibold text-white tracking-tight">StructClone</h1>
+           </div>
+           <p className="text-xs text-[#a1a1aa] leading-relaxed">
+             Replicate directory structures without files.
+           </p>
         </div>
-        <div className="flex gap-6 text-xs font-mono">
-          <div className="text-right">
-            <div className="text-slate-500 uppercase">Status</div>
-            <div className={isScanning ? "text-blue-400" : "text-green-400"}>
-              ● {isScanning ? "SCANNING" : "ACTIVE / IDLE"}
-            </div>
-          </div>
-          <div className="text-right hidden sm:block">
-            <div className="text-slate-500 uppercase">Last Scan</div>
-            <div className="text-white">{totalFolders > 0 ? `${totalFolders} nodes` : "N/A"}</div>
-          </div>
-        </div>
-      </header>
 
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 h-full min-h-0 overflow-hidden">
-        <aside className="col-span-1 lg:col-span-4 flex flex-col gap-4 overflow-y-auto lg:overflow-hidden pb-4 lg:pb-0 scrollbar-hide">
-          <div className="bento-card p-5 flex flex-col shrink-0">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
-              1. Source Input
-            </h3>
-            <button 
-              onClick={handleDirectoryPicker}
-              className={`w-full py-6 border-2 border-dashed border-[#30363D] rounded-lg hover:bg-slate-800/30 flex flex-col items-center justify-center gap-2 group transition-all ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}
-            >
-              <div className="w-10 h-10 bg-[#161B22] rounded-full flex items-center justify-center group-hover:bg-blue-500/20 transition-all">
-                <FolderOpen className="w-5 h-5 text-blue-500" />
-              </div>
-              <span className="text-sm font-medium text-white">Open Directory Picker</span>
-              <span className="text-[10px] text-slate-500 font-mono text-center px-4">
-                window.showDirectoryPicker()<br />
-                <span className="text-yellow-500/70 block mt-1">(Requires opening app in new tab)</span>
-              </span>
-            </button>
-            <div 
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              className={`mt-4 p-4 border rounded-lg flex items-center gap-3 transition-colors ${dragOver ? 'bg-blue-500/10 border-blue-500/50' : 'bg-[#161B22] border-[#30363D]'} ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}
-            >
-              <div className="w-8 h-8 flex-shrink-0 bg-slate-800 rounded flex items-center justify-center">
-                <Upload className="w-4 h-4 text-slate-400" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white">Drag & Drop Zone</div>
-                <div className="text-[10px] text-slate-500">Recursive drop supported</div>
-              </div>
-            </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
+          {/* 1. Source */}
+          <section>
+            <h2 className="text-[11px] font-semibold text-[#71717a] uppercase tracking-wider mb-3 flex items-center gap-2">
+               <HardDrive size={12} /> Input Source
+            </h2>
             
+            <div 
+              className={`relative overflow-hidden border rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer
+                ${dragOver ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-[#262626] bg-[#121212] hover:bg-[#1a1a1a]'} 
+                ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}
+              onClick={() => {
+                // Clicking the drag/drop zone also triggers picker if they want
+                // Better UX than just doing nothing
+                handleDirectoryPicker();
+              }}
+            >
+               <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${dragOver ? 'bg-indigo-500/20 text-indigo-400' : 'bg-[#262626] text-[#a1a1aa]'}`}>
+                 <Upload size={20} />
+               </div>
+               <div className="text-center pointer-events-none">
+                 <div className="text-sm font-medium text-[#ededed] mb-1">Drag & drop folder</div>
+                 <div className="text-xs text-[#71717a]">or click to browse</div>
+               </div>
+            </div>
+
+            <p className="text-[10px] text-[#71717a] text-center mt-3 px-2 leading-tight">
+               File Picker API behaves best when opened in a new tab.
+            </p>
+
             {error && (
-               <div className="mt-4 border border-red-500/20 bg-red-500/5 rounded-lg p-3 flex gap-2 text-red-400">
+               <div className="mt-4 border border-red-900/30 bg-red-900/10 rounded-lg p-3 flex items-start gap-2 text-red-400">
                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                  <p className="text-xs leading-relaxed">{error}</p>
                </div>
             )}
-          </div>
+          </section>
 
-          <div className="bento-card p-5 shrink-0">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
-              2. Scan Logic
-            </h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-300">Recursive Depth</span>
+          {/* 2. Options */}
+          <section>
+            <h2 className="text-[11px] font-semibold text-[#71717a] uppercase tracking-wider mb-3 flex items-center gap-2">
+               <Settings size={12} /> Configuration
+            </h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="flex items-center justify-between text-sm text-[#ededed] mb-1.5">
+                  <span>Max Depth</span>
+                  <span className="text-xs text-[#71717a] font-mono">{maxDepth === '' ? 'Unlimited' : maxDepth}</span>
+                </label>
                 <input 
                   type="number" 
                   min="0"
-                  placeholder="Unlimited"
+                  placeholder="Leave empty for unlimited"
                   value={maxDepth}
                   onChange={(e) => {
                     const val = e.target.value;
                     setMaxDepth(val === '' ? '' : parseInt(val, 10));
-                    setTree(null); // Reset tree on depth change so they rescan
+                    setTree(null); 
                   }}
-                  className="w-24 bg-[#161B22] border border-[#30363D] rounded px-2 py-1 text-xs font-mono text-blue-400 font-bold focus:outline-none focus:border-blue-500 text-right placeholder:text-blue-400/50"
+                  className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-[#ededed] placeholder:text-[#71717a] focus:outline-none transition-colors"
                   disabled={isScanning}
                 />
               </div>
-              <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 w-full opacity-50"></div>
-              </div>
-              <div className="flex items-center gap-3 mt-4">
-                <input type="checkbox" checked readOnly className="accent-blue-500 w-4 h-4 rounded border-slate-700 bg-slate-900"/>
-                <label className="text-xs text-slate-300">Preserve Empty Directories</label>
-              </div>
-              <div className="flex items-center gap-3">
-                <input type="checkbox" readOnly className="accent-blue-500 w-4 h-4 rounded border-slate-700 bg-slate-900 opacity-50"/>
-                <label className="text-xs text-slate-500">Include Hidden Folders (.git, etc) - N/A</label>
-              </div>
+              
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className="relative flex items-center justify-center w-4 h-4">
+                   <input type="checkbox" defaultChecked className="sr-only peer" />
+                   <div className="w-4 h-4 border border-[#3f3f46] rounded peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-colors"></div>
+                   <svg className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                   </svg>
+                </div>
+                <span className="text-sm text-[#a1a1aa] group-hover:text-[#ededed] transition-colors select-none">Include empty folders</span>
+              </label>
             </div>
-          </div>
+          </section>
+        </div>
 
-          <div className="bento-card p-5 bg-blue-500/5 border-blue-500/30 flex flex-col justify-between shrink-0">
-            <div>
-              <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-4">
-                3. Export
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed mb-4">
-                Generates a JSZip object containing the empty directory tree. No file content is read or exported.
-              </p>
-            </div>
-            <button 
+        {/* Footer action */}
+        <div className="p-6 border-t border-[#262626] bg-[#0a0a0a]">
+           <button 
               onClick={handleExport}
               disabled={!tree || isScanning}
-              className={`w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${tree && !isScanning ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20 active:scale-95' : 'bg-[#1a1a1a] text-slate-500 shadow-none cursor-not-allowed'}`}
+              className={`w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all duration-200
+                ${tree && !isScanning 
+                  ? 'bg-[#ededed] text-[#0a0a0a] hover:bg-white shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] active:scale-[0.98]' 
+                  : 'bg-[#121212] border border-[#262626] text-[#71717a] cursor-not-allowed'}`}
             >
-              Download Replicated ZIP <Download className="w-4 h-4" />
-            </button>
-          </div>
-        </aside>
+              <Download size={16} />
+              Download ZIP
+           </button>
+        </div>
+      </div>
 
-        <section className="col-span-1 lg:col-span-8 flex flex-col gap-4 h-full min-h-0 overflow-hidden">
-          <div className="bento-card flex flex-col h-full overflow-hidden">
-            <div className="p-4 border-b border-[#30363D] flex justify-between items-center bg-[#0D1117] shrink-0">
-              <div className="flex items-center gap-3">
-                <div className={`w-2 h-2 rounded-full ${isScanning ? 'bg-blue-500 animate-pulse' : (tree ? 'bg-green-500' : 'bg-slate-500')}`}></div>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Visual Tree Preview
-                </h3>
-              </div>
-              <div className="text-[10px] font-mono text-slate-500 truncate max-w-[200px] hidden sm:block">
-                {tree ? tree.name : ""}
-              </div>
-            </div>
-            
-            <div className="flex-1 p-6 font-mono text-sm scrollbar-hide overflow-y-auto w-full relative">
-              {!tree && !isScanning && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-50">
-                   <FolderOpen size={48} className="mb-4 text-slate-600" />
-                   <p className="uppercase tracking-widest text-xs font-bold">Awaiting Input</p>
-                </div>
-              )}
-              {isScanning && (
-                 <div className="absolute inset-0 flex flex-col items-center justify-center text-blue-500">
-                    <div className="w-8 h-8 rounded-full border-2 border-blue-500/20 border-t-blue-500 animate-spin mb-4" />
-                    <p className="uppercase tracking-widest text-xs font-bold">Scanning...</p>
-                 </div>
-              )}
-              {tree && (
-                <div className="max-w-4xl min-w-max pb-12">
-                  <TreeView node={tree} />
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 bg-black/40 border-t border-[#30363D] flex justify-between items-center px-6 shrink-0">
-              <div className="flex gap-4 text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">
-                <span>Folders: {totalFolders}</span>
-                <span>Max Depth: ~</span>
-                <span>Size: 0.0 KB</span>
-              </div>
-              <div className="text-[10px] text-blue-400 italic font-mono hidden sm:block">
-                Auto-updates as structure changes
-              </div>
+      {/* Main Content Area */}
+      <div className="flex-1 hidden sm:flex flex-col relative bg-[#050505]">
+        {dragOver && (
+          <div className="absolute inset-0 bg-indigo-500/5 backdrop-blur-[2px] z-30 flex items-center justify-center border-2 border-indigo-500/50 border-dashed m-4 rounded-3xl">
+            <div className="bg-[#121212] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 text-indigo-400">
+               <Upload size={24} className="animate-bounce" />
+               <span className="font-medium">Drop directory to clone mapping</span>
             </div>
           </div>
-        </section>
-      </main>
+        )}
+
+        {/* Header */}
+        <div className="h-14 border-b border-[#262626] flex items-center justify-between px-8 absolute top-0 w-full bg-[#050505]/95 backdrop-blur z-10">
+           <div className="flex items-center gap-3">
+             <Files size={16} className="text-[#a1a1aa]" />
+             <span className="text-sm font-medium text-[#ededed]">Preview Explorer</span>
+           </div>
+           <div className="flex items-center gap-4 text-xs font-mono">
+             {isScanning ? (
+               <span className="flex items-center gap-2 text-indigo-400">
+                 <RefreshCw size={12} className="animate-spin" /> Scanning...
+               </span>
+             ) : tree ? (
+               <span className="text-[#a1a1aa] bg-[#1a1a1a] px-2.5 py-1 rounded-md border border-[#262626]">
+                 {totalFolders} directories
+               </span>
+             ) : null}
+           </div>
+        </div>
+
+        {/* Tree Content */}
+        <div className="flex-1 overflow-auto pt-20 px-8 pb-12 relative">
+          {!tree && !isScanning && (
+             <div className="h-full flex flex-col items-center justify-center text-[#71717a] gap-4">
+               <FolderOpen size={48} className="opacity-20" />
+               <p className="text-sm font-medium">Select a root directory to map structure</p>
+             </div>
+          )}
+          
+          {tree && (
+             <div className="max-w-5xl">
+                <TreeView node={tree} />
+             </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
