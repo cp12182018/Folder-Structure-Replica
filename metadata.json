@@ -1,0 +1,6 @@
+{
+  "name": "Folder Structure Replicator",
+  "description": "Offline-first browser utility to duplicate directory tree structures into empty folders (ZIP) via Drag-and-Drop or File System Access API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

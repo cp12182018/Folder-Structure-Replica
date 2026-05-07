@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+@theme {
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', -apple-system, sans-serif;
+}
+
+body { 
+  background-color: #050505; 
+  color: #E0E0E0; 
+  margin: 0; 
+} 
+
+.bento-card { 
+  background: #0D1117; 
+  border: 1px solid #30363D; 
+  border-radius: 12px; 
+  height: 100%; 
+  transition: border-color 0.2s; 
+} 
+
+.bento-card:hover { 
+  border-color: #58A6FF; 
+} 
+
+.tree-line { 
+  border-left: 1px solid #30363D; 
+  margin-left: 14px; 
+  padding-left: 18px; 
+  position: relative; 
+} 
+
+.tree-line::before { 
+  content: ''; 
+  position: absolute; 
+  left: 0; 
+  top: 12px; 
+  width: 12px; 
+  height: 1px; 
+  background: #30363D; 
+} 
+
+.scrollbar-hide::-webkit-scrollbar { 
+  display: none; 
+}
