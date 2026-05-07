@@ -60,23 +60,20 @@ export default function App() {
   };
 
   // 1: File API recursive scanning
-  const scanDirHandle = async (dirHandle: any, currentPath: string, currentDepth: number): Promise<TreeNode> => {
+  const scanDirHandle = async (dirHandle: any, currentPath: string): Promise<TreeNode> => {
     const node: TreeNode = {
       name: dirHandle.name,
       path: currentPath ? `${currentPath}/${dirHandle.name}` : dirHandle.name,
       children: [],
     };
     
-    const depthLimit = typeof maxDepth === 'number' ? maxDepth : Infinity;
-
-    if (currentDepth < depthLimit) {
-      for await (const entry of dirHandle.values()) {
-        if (entry.kind === 'directory') {
-          node.children.push(await scanDirHandle(entry, node.path, currentDepth + 1));
-        }
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind === 'directory') {
+        node.children.push(await scanDirHandle(entry, node.path));
       }
-      node.children.sort((a, b) => a.name.localeCompare(b.name));
     }
+    node.children.sort((a, b) => a.name.localeCompare(b.name));
+    
     return node;
   };
 
@@ -89,7 +86,7 @@ export default function App() {
       
       const dirHandle = await (window as any).showDirectoryPicker();
       setIsScanning(true);
-      const rootNode = await scanDirHandle(dirHandle, '', 0);
+      const rootNode = await scanDirHandle(dirHandle, '');
       setTree(rootNode);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -105,7 +102,7 @@ export default function App() {
   };
 
   // 2: Drag & Drop recursive scanning
-  const scanDropEntry = async (entry: any, currentPath: string, currentDepth: number): Promise<TreeNode | null> => {
+  const scanDropEntry = async (entry: any, currentPath: string): Promise<TreeNode | null> => {
     if (entry.isDirectory) {
       const node: TreeNode = {
         name: entry.name,
@@ -113,35 +110,32 @@ export default function App() {
         children: [],
       };
       
-      const depthLimit = typeof maxDepth === 'number' ? maxDepth : Infinity;
-
-      if (currentDepth < depthLimit) {
-        const dirReader = entry.createReader();
-        const readAllEntries = async () => {
-          let entries: any[] = [];
-          let hasMore = true;
-          while (hasMore) {
-            const batch = await new Promise<any[]>((resolve, reject) => {
-              dirReader.readEntries(resolve, reject);
-            });
-            if (batch.length === 0) {
-              hasMore = false;
-            } else {
-              entries.push(...batch);
-            }
-          }
-          return entries;
-        };
-
-        const entries = await readAllEntries();
-        for (const child of entries) {
-          if (child.isDirectory) {
-            const childNode = await scanDropEntry(child, node.path, currentDepth + 1);
-            if (childNode) node.children.push(childNode);
+      const dirReader = entry.createReader();
+      const readAllEntries = async () => {
+        let entries: any[] = [];
+        let hasMore = true;
+        while (hasMore) {
+          const batch = await new Promise<any[]>((resolve, reject) => {
+            dirReader.readEntries(resolve, reject);
+          });
+          if (batch.length === 0) {
+            hasMore = false;
+          } else {
+            entries.push(...batch);
           }
         }
-        node.children.sort((a, b) => a.name.localeCompare(b.name));
+        return entries;
+      };
+
+      const entries = await readAllEntries();
+      for (const child of entries) {
+        if (child.isDirectory) {
+          const childNode = await scanDropEntry(child, node.path);
+          if (childNode) node.children.push(childNode);
+        }
       }
+      node.children.sort((a, b) => a.name.localeCompare(b.name));
+      
       return node;
     }
     return null;
@@ -163,7 +157,7 @@ export default function App() {
             if (entry && entry.isDirectory) {
                setIsScanning(true);
                try {
-                   const rootNode = await scanDropEntry(entry, '', 0);
+                   const rootNode = await scanDropEntry(entry, '');
                    if (rootNode) setTree(rootNode);
                } catch (err: any) {
                    setError(err.message || 'Error parsing dropped folder.');
@@ -179,8 +173,20 @@ export default function App() {
     }
   };
 
+  const getPrunedTree = (node: TreeNode, currentDepth: number, depthLimit: number): TreeNode => {
+    if (currentDepth >= depthLimit) {
+      return { ...node, children: [] };
+    }
+    return {
+      ...node,
+      children: node.children.map(child => getPrunedTree(child, currentDepth + 1, depthLimit))
+    };
+  };
+
+  const displayTree = tree && typeof maxDepth === 'number' ? getPrunedTree(tree, 0, maxDepth) : tree;
+
   const handleExport = async () => {
-    if (!tree) return;
+    if (!displayTree) return;
     try {
       const zip = new JSZip();
       
@@ -193,7 +199,7 @@ export default function App() {
         }
       };
       
-      addNodeToZip(tree, zip);
+      addNodeToZip(displayTree, zip);
       
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
@@ -213,7 +219,7 @@ export default function App() {
     return 1 + node.children.reduce((acc, child) => acc + countFolders(child), 0);
   };
   
-  const totalFolders = tree ? countFolders(tree) : 0;
+  const totalFolders = displayTree ? countFolders(displayTree) : 0;
 
   return (
     <div 
@@ -299,7 +305,6 @@ export default function App() {
                   onChange={(e) => {
                     const val = e.target.value;
                     setMaxDepth(val === '' ? '' : parseInt(val, 10));
-                    setTree(null); 
                   }}
                   className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-[#ededed] placeholder:text-[#71717a] focus:outline-none transition-colors"
                   disabled={isScanning}
@@ -324,9 +329,9 @@ export default function App() {
         <div className="p-6 border-t border-[#262626] bg-[#0a0a0a]">
            <button 
               onClick={handleExport}
-              disabled={!tree || isScanning}
+              disabled={!displayTree || isScanning}
               className={`w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all duration-200
-                ${tree && !isScanning 
+                ${displayTree && !isScanning 
                   ? 'bg-[#ededed] text-[#0a0a0a] hover:bg-white shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] active:scale-[0.98]' 
                   : 'bg-[#121212] border border-[#262626] text-[#71717a] cursor-not-allowed'}`}
             >
@@ -358,7 +363,7 @@ export default function App() {
                <span className="flex items-center gap-2 text-indigo-400">
                  <RefreshCw size={12} className="animate-spin" /> Scanning...
                </span>
-             ) : tree ? (
+             ) : displayTree ? (
                <span className="text-[#a1a1aa] bg-[#1a1a1a] px-2.5 py-1 rounded-md border border-[#262626]">
                  {totalFolders} directories
                </span>
@@ -375,9 +380,9 @@ export default function App() {
              </div>
           )}
           
-          {tree && (
+          {displayTree && (
              <div className="max-w-5xl">
-                <TreeView node={tree} />
+                <TreeView node={displayTree} />
              </div>
           )}
         </div>
