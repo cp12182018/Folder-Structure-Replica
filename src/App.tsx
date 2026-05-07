@@ -53,6 +53,7 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [maxDepth, setMaxDepth] = useState<number | ''>('');
+  const [includeEmpty, setIncludeEmpty] = useState<boolean>(true);
 
   const resetState = () => {
     setTree(null);
@@ -67,11 +68,18 @@ export default function App() {
       children: [],
     };
     
-    for await (const entry of dirHandle.values()) {
-      if (entry.kind === 'directory') {
-        node.children.push(await scanDirHandle(entry, node.path));
+    try {
+      if (dirHandle.values) {
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'directory') {
+            node.children.push(await scanDirHandle(entry, node.path));
+          }
+        }
       }
+    } catch (e) {
+      console.warn("Could not read contents of directory", dirHandle.name, e);
     }
+    
     node.children.sort((a, b) => a.name.localeCompare(b.name));
     
     return node;
@@ -89,11 +97,13 @@ export default function App() {
       const rootNode = await scanDirHandle(dirHandle, '');
       setTree(rootNode);
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
+      console.error("DirectoryPicker error:", err);
+      // "AbortError" is thrown when user cancels the picker. We ignore it.
+      if (err.name !== 'AbortError' && err.message !== 'The user aborted a request.') {
         if (err.name === 'SecurityError' || err.message?.includes('Cross origin') || err.message?.includes('showDirectoryPicker')) {
           setError("The modern File Picker is blocked inside preview iframes. Please open the app in a new tab (using the button in the top right), or use the Drag & Drop zone below which works perfectly here.");
         } else {
-          setError(err.message || 'Failed to read directory.');
+          setError(err.message ? err.message : 'Failed to read directory. Please try dragging and dropping instead.');
         }
       }
     } finally {
@@ -110,30 +120,35 @@ export default function App() {
         children: [],
       };
       
-      const dirReader = entry.createReader();
-      const readAllEntries = async () => {
-        let entries: any[] = [];
-        let hasMore = true;
-        while (hasMore) {
-          const batch = await new Promise<any[]>((resolve, reject) => {
-            dirReader.readEntries(resolve, reject);
-          });
-          if (batch.length === 0) {
-            hasMore = false;
-          } else {
-            entries.push(...batch);
+      try {
+        const dirReader = entry.createReader();
+        const readAllEntries = async () => {
+          let entries: any[] = [];
+          let hasMore = true;
+          while (hasMore) {
+            const batch = await new Promise<any[]>((resolve, reject) => {
+              dirReader.readEntries(resolve, reject);
+            });
+            if (batch.length === 0) {
+              hasMore = false;
+            } else {
+              entries.push(...batch);
+            }
+          }
+          return entries;
+        };
+
+        const entries = await readAllEntries();
+        for (const child of entries) {
+          if (child.isDirectory) {
+            const childNode = await scanDropEntry(child, node.path);
+            if (childNode) node.children.push(childNode);
           }
         }
-        return entries;
-      };
-
-      const entries = await readAllEntries();
-      for (const child of entries) {
-        if (child.isDirectory) {
-          const childNode = await scanDropEntry(child, node.path);
-          if (childNode) node.children.push(childNode);
-        }
+      } catch (e) {
+        console.warn("Could not read dropped directory contents", entry.name, e);
       }
+      
       node.children.sort((a, b) => a.name.localeCompare(b.name));
       
       return node;
@@ -143,18 +158,26 @@ export default function App() {
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOver(false);
     resetState();
     
     // Check if dropping on the window works correctly
     const items = e.dataTransfer.items;
-    if (!items || items.length === 0) return;
+    
+    if (!items || items.length === 0) {
+      setError("No files/folders detected in drop.");
+      return;
+    }
+
+    let folderFound = false;
 
     for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (item.kind === 'file') {
             const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : (item as any).getAsEntry();
             if (entry && entry.isDirectory) {
+               folderFound = true;
                setIsScanning(true);
                try {
                    const rootNode = await scanDropEntry(entry, '');
@@ -165,25 +188,42 @@ export default function App() {
                    setIsScanning(false);
                }
                return; // Only process the first folder dropped
-            } else if (entry && entry.isFile) {
-               setError("Please drop a folder, not a file.");
-               return;
             }
         }
     }
+    
+    if (!folderFound) {
+      setError("Please drop a folder, not a file.");
+    }
   };
 
-  const getPrunedTree = (node: TreeNode, currentDepth: number, depthLimit: number): TreeNode => {
-    if (currentDepth >= depthLimit) {
+  const getPrunedTree = (node: TreeNode, currentDepth: number, depthLimit: number): TreeNode | null => {
+    const isAtDepthLimit = currentDepth >= depthLimit;
+    
+    if (isAtDepthLimit) {
+      // If we are pruning empty and we're at the leaf depth (and we're pretending it has no children)
+      if (!includeEmpty) return null;
       return { ...node, children: [] };
     }
+
+    const children = node.children
+      .map(child => getPrunedTree(child, currentDepth + 1, depthLimit))
+      .filter((child): child is TreeNode => child !== null);
+      
+    if (!includeEmpty && children.length === 0 && currentDepth > 0) {
+      return null;
+    }
+
     return {
       ...node,
-      children: node.children.map(child => getPrunedTree(child, currentDepth + 1, depthLimit))
+      children
     };
   };
 
-  const displayTree = tree && typeof maxDepth === 'number' ? getPrunedTree(tree, 0, maxDepth) : tree;
+  const depthLim = typeof maxDepth === 'number' ? maxDepth : Infinity;
+  const prunedTree = tree ? getPrunedTree(tree, 0, depthLim) : null;
+  // If the root node gets pruned entirely because includeEmpty is false and it has no children, we fall back to tree or null
+  const displayTree = prunedTree ? prunedTree : (tree && includeEmpty ? { ...tree, children: [] } : null);
 
   const handleExport = async () => {
     if (!displayTree) return;
@@ -224,8 +264,11 @@ export default function App() {
   return (
     <div 
       className="flex h-screen w-full bg-[#050505] text-[#ededed] font-sans overflow-hidden"
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
       onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
         // Only reset if dragging leaves the window
         if (!e.currentTarget.contains(e.relatedTarget as Node)) {
           setDragOver(false);
@@ -313,7 +356,12 @@ export default function App() {
               
               <label className="flex items-center gap-3 cursor-pointer group">
                 <div className="relative flex items-center justify-center w-4 h-4">
-                   <input type="checkbox" defaultChecked className="sr-only peer" />
+                   <input 
+                     type="checkbox" 
+                     checked={includeEmpty}
+                     onChange={(e) => setIncludeEmpty(e.target.checked)}
+                     className="sr-only peer" 
+                   />
                    <div className="w-4 h-4 border border-[#3f3f46] rounded peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-colors"></div>
                    <svg className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -344,7 +392,7 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 hidden sm:flex flex-col relative bg-[#050505]">
         {dragOver && (
-          <div className="absolute inset-0 bg-indigo-500/5 backdrop-blur-[2px] z-30 flex items-center justify-center border-2 border-indigo-500/50 border-dashed m-4 rounded-3xl">
+          <div className="absolute inset-0 bg-indigo-500/5 backdrop-blur-[2px] z-30 flex items-center justify-center border-2 border-indigo-500/50 border-dashed m-4 rounded-3xl pointer-events-none">
             <div className="bg-[#121212] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 text-indigo-400">
                <Upload size={24} className="animate-bounce" />
                <span className="font-medium">Drop directory to clone mapping</span>
